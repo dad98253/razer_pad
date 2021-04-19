@@ -3,7 +3,19 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <errno.h>
-#define mydebug 0 
+#include <dirent.h>
+#include <string.h>
+#define mydebug 0
+#define FOUND	0
+#define NOT_FOUND	1
+#define READ_ERROR	2
+#define OPEN_ERROR	3
+
+int LoadDirectoryContents(const char* sDir,const char* name);
+
+int breaknow = 0;
+char OpenPath[2048];
+
 int main() {
 	int bright,dim,mindim,val,iret,red,green;
 	unsigned long long int user,nice,system,idle,iowait,irq,softirq,steal,guest,guest_nice,tot,oldidle,oldtot;
@@ -23,7 +35,14 @@ int main() {
 // Note that the following open statement is based on the usb device address for the pad when installed on my machine
 // You will likely need to modify this address to match the location on your machine.
 // This approach works on ubuntu 18.04.
-	fptr = fopen("/sys/devices/pci0000:00/0000:00:14.0/usb3/3-7/3-7:1.0/0003:1532:0C02.0005/matrix_brightness","r+");
+	//	fptr = fopen("/sys/devices/pci0000:00/0000:00:14.0/usb3/3-7/3-7:1.0/0003:1532:0C02.0006/matrix_brightness","r+");
+	//	fptr = fopen("/sys/devices/pci0000:00/0000:00:14.0/usb3/3-7/3-7:1.0/0003:1532:0C02.000F/matrix_brightness","r+");
+	//  fptr = fopen("/sys/devices/pci0000:00/0000:00:14.0/usb3/3-7/3-7:1.0/0003:1532:0C02.0005/matrix_brightness","r+");
+#ifdef DEBUG
+	fprintf(stderr,"look for matix_brightness" ); // prints look for matix_brightness
+#endif
+	iret = LoadDirectoryContents("/sys/devices","matrix_brightness");
+	fptr = fopen(OpenPath,"r+");
 	if(fptr == NULL) {	
 		printf("Error 1!");   
 		exit(1);
@@ -36,7 +55,10 @@ int main() {
 	}
 	// 'matrix_effect_static', b'\xFF\x00\x00'
 	// (see note above regarding usb addresses)
-	fptr3 = fopen("/sys/devices/pci0000:00/0000:00:14.0/usb3/3-7/3-7:1.0/0003:1532:0C02.0005/matrix_effect_static","wb");
+	//fptr3 = fopen("/sys/devices/pci0000:00/0000:00:14.0/usb3/3-7/3-7:1.0/0003:1532:0C02.0005/matrix_effect_static","wb");
+	breaknow = 0;
+	iret = LoadDirectoryContents("/sys/devices","matrix_effect_static");
+	fptr3 = fopen(OpenPath,"wb");
 	if(fptr3 == NULL) {	
 		printf("Error 5!");   
 		exit(5);
@@ -106,4 +128,77 @@ int main() {
 
 	return(0);
 
+}
+
+
+int LoadDirectoryContents(const char* sDir,const char* name){
+	struct dirent *dp;
+	struct dirent d;
+	DIR *dirp;
+
+	dp = &d;
+//	const char * typemsg;
+
+	char sPath[2048];
+
+	if (breaknow) return (0);
+	dirp = opendir(sDir);
+
+	while (dirp) {
+		errno = 0;
+
+		if ((dp = readdir(dirp)) != NULL) {
+			if (strcmp(dp->d_name, ".") != 0
+				&& strcmp(dp->d_name, "..") != 0)
+				{
+#ifdef DEBUG
+//					fprintf(stderr, "in LoadDirectoryContents, found \"%s\"\n", dp->d_name);
+#endif
+					//Build up our file path using the passed in
+					//  [sDir] and the file/foldername we just found:
+					sprintf(sPath, "%s/%s", sDir, dp->d_name);
+#ifdef DEBUG
+/*					if ( dp->d_type == DT_BLK ) typemsg = "This is a block device.";
+					if ( dp->d_type == DT_CHR ) typemsg = "This is a character device.";
+					if ( dp->d_type == DT_DIR ) typemsg = "This is a directory.";
+					if ( dp->d_type == DT_FIFO ) typemsg = "This is a named pipe (FIFO).";
+					if ( dp->d_type == DT_LNK ) typemsg = "This is a symbolic link.";
+					if ( dp->d_type == DT_REG ) typemsg = "This is a regular file.";
+					if ( dp->d_type == DT_SOCK ) typemsg = "This is a UNIX domain socket.";
+					if ( dp->d_type == DT_UNKNOWN ) typemsg = "The file type could not be determined.";
+					fprintf(stderr,"%s ... %s\n",sPath,typemsg); */
+#endif
+					//Is the entity a File or Folder?
+					if ( dp->d_type == DT_DIR ) {
+						LoadDirectoryContents(sPath,name);
+						if(breaknow) {
+							closedir(dirp);
+							return FOUND;
+						}
+					} else {
+#ifdef DEBUG
+//							printf("\"%s\"  ... at %s\n",dp->d_name,sPath);
+#endif
+						if (strcmp(dp->d_name, name) == 0) {
+							breaknow = 1;
+#ifdef DEBUG
+							printf("%s found! ... at %s\n",name,sPath);
+#endif
+							strcpy(OpenPath,sPath);
+							closedir(dirp);
+							return FOUND;
+						}
+					}
+				}
+		} else {
+			if (errno == 0) {
+				closedir(dirp);
+				return NOT_FOUND;
+			}
+			closedir(dirp);
+			return READ_ERROR;
+		}
+	}
+
+return OPEN_ERROR;
 }
